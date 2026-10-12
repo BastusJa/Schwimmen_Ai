@@ -42,7 +42,7 @@ class Enviroment(Env):
         self.deck_out_of_cards = False
         self.card_deck.shuffle()
         self.hand_cards = []
-        self.last_score = 0
+        self.best_score = 0
         self.known_enemy_cards = [[None for _ in range(3)] for _ in range(self.player_count - 1)]
         for i in range(self.player_count):
             cards = self.get_cards_from_deck(3)
@@ -158,8 +158,8 @@ class Enviroment(Env):
 
     def score_to_reward(self, reward):
         current_score = self.scores[0] if hasattr(self, 'scores') else 0
-        reward += current_score / 100 - self.last_score / 100
-        self.last_score = current_score
+        reward += current_score / 100 - self.best_score / 100
+        self.best_score = max(self.best_score, current_score)
         return reward
         
     def is_done(self):

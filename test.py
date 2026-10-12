@@ -64,7 +64,9 @@ class DeterministicSchwimmen:
         middle = self.env.middle_cards
         current_score = hand_score(hand)
 
-        best_action = 1  # swipe if no swap gives an improvement
+        # If the hand is already strong and no swap improves it, knock to
+        # finish the round instead of giving the agent another opportunity.
+        best_action = 0 if current_score > 28 else 1
         best_score = current_score
 
         # Action 2: swap all three cards.
