@@ -9,7 +9,7 @@ import os
 import logging
 
 file_path = "ppo_model.zip"
-policy_kwargs = dict(net_arch=dict(pi=[256, 128], vf=[256, 128]))
+policy_kwargs = dict(net_arch=dict(pi=[32, 64, 32], vf=[32, 64, 32]))
 
 for i in range(1000):
     def make_env():

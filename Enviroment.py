@@ -24,7 +24,6 @@ class Enviroment(Env):
         self.max_turns = 30
         self.win_count = [0] * player_count
         self.former_middle_cards = np.array([])
-        self.middle_obs_cached = np.zeros(shape=(self.max_turns * 12,))
         self.ui_cards = [[None for _ in range(3)] for _ in range(self.player_count + 1)]
         self.selected_ui_cards = []
         self.selected_card_pos = []
@@ -35,7 +34,7 @@ class Enviroment(Env):
         self.observation_space = spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(15+self.max_turns * 12,),
+            shape=(15+(self.player_count - 1) * 6,),
             dtype=np.float32
         )
         self.reset()
@@ -45,6 +44,7 @@ class Enviroment(Env):
         self.deck_out_of_cards = False
         self.card_deck.shuffle()
         self.hand_cards = []
+        self.known_enemy_cards = [[] for _ in range(self.player_count - 1)]
         for i in range(self.player_count):
             cards = self.get_cards_from_deck(3)
             self.hand_cards.append(cards)
@@ -196,27 +196,35 @@ class Enviroment(Env):
     
     def __get_vec_obs(self):
         base_observation = np.array([
-            self.hand_cards[0][0].value / 11,
-            self.hand_cards[0][1].value / 11,
-            self.hand_cards[0][2].value / 11,
-            self.middle_cards[0].value / 11,
-            self.middle_cards[1].value / 11,
-            self.middle_cards[2].value / 11,
-            self.__get_suit_value(self.hand_cards[0][0].suit) / 3,
-            self.__get_suit_value(self.hand_cards[0][1].suit) / 3,
-            self.__get_suit_value(self.hand_cards[0][2].suit) / 3,
-            self.__get_suit_value(self.middle_cards[0].suit) / 3,
-            self.__get_suit_value(self.middle_cards[1].suit) / 3,
-            self.__get_suit_value(self.middle_cards[2].suit) / 3,
+            self.hand_cards[0][0].value / 12,
+            self.__get_suit_value(self.hand_cards[0][0].suit) / 4,
+            self.hand_cards[0][1].value / 12,
+            self.__get_suit_value(self.hand_cards[0][1].suit) / 4,
+            self.hand_cards[0][2].value / 12,
+            self.__get_suit_value(self.hand_cards[0][2].suit) / 4,
+            self.middle_cards[0].value / 12,
+            self.__get_suit_value(self.middle_cards[0].suit) / 4,
+            self.middle_cards[1].value / 12,
+            self.__get_suit_value(self.middle_cards[1].suit) / 4,
+            self.middle_cards[2].value / 12,
+            self.__get_suit_value(self.middle_cards[2].suit) / 4,         
             self.turns / self.max_turns,
             1 if self.knocked > 0 else 0,
             1 if self.swiped < 0 else 0
         ], dtype=np.float32)
-        middle_observation = self.middle_obs_cached
-        if len(self.former_middle_cards) > 0:
-            middle_observation[self.turns:self.turns+6] = np.array([[card.value / 13, self.__get_suit_value(card.suit) / 3] for card in self.former_middle_cards]).ravel()
-            self.former_middle_cards = np.array([])
-        observation = np.append(base_observation, middle_observation)
+        # Keep the observation length fixed. Unknown enemy cards are encoded
+        # as ones, while known cards replace the corresponding placeholders.
+        enemy_observation = []
+        for enemy_cards in self.known_enemy_cards:
+            for j in range(3):
+                if j < len(enemy_cards):
+                    enemy_observation.extend([
+                        enemy_cards[j].value / 12,
+                        self.__get_suit_value(enemy_cards[j].suit) / 4,
+                    ])
+                else:
+                    enemy_observation.extend([1.0, 1.0])
+        observation = np.append(base_observation, enemy_observation)
         return observation
     
     def __get_suit_value(self, suit):
