@@ -7,9 +7,11 @@ from Enviroment import Enviroment
 from stable_baselines3.common.env_util import make_vec_env
 
 class Enemy:
-    def __init__(self, file_path):
+    def __init__(self, file_path=None, model=None):
         self.action_space = Discrete(12) 
-        if os.path.exists(file_path):
+        if model is not None:
+            self.model = model
+        elif file_path and os.path.exists(file_path):
             self.model = PPO.load(file_path)
         else:
             self.model = MockModel(self.action_space)

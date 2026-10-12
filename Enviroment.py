@@ -1,5 +1,3 @@
-import time
-
 from gymnasium import Env
 from gymnasium import spaces
 from gymnasium.spaces.discrete import Discrete
@@ -8,7 +6,6 @@ import logging
 
 from CardDeck import CardDeck
 from Card import Card
-import copy
 import pygame
 
 # lose and knocked with same score
@@ -23,7 +20,6 @@ class Enviroment(Env):
         self.player_count = player_count
         self.max_turns = 30
         self.win_count = [0] * player_count
-        self.former_middle_cards = np.array([])
         self.ui_cards = [[None for _ in range(3)] for _ in range(self.player_count + 1)]
         self.selected_ui_cards = []
         self.selected_card_pos = []
@@ -40,11 +36,14 @@ class Enviroment(Env):
         self.reset()
 
     def reset(self, seed=None, options=None):
-        self.card_deck = copy.deepcopy(self.init_card_deck)
+        # Creating 32 cards is cheaper than deep-copying the deck and all
+        # Card instances at every episode reset.
+        self.card_deck = CardDeck()
         self.deck_out_of_cards = False
         self.card_deck.shuffle()
         self.hand_cards = []
-        self.known_enemy_cards = [[] for _ in range(self.player_count - 1)]
+        self.last_score = 0
+        self.known_enemy_cards = [[None for _ in range(3)] for _ in range(self.player_count - 1)]
         for i in range(self.player_count):
             cards = self.get_cards_from_deck(3)
             self.hand_cards.append(cards)
@@ -79,47 +78,65 @@ class Enviroment(Env):
         return self.state, reward, terminated, truncated, info
     
     def do_act(self, action, player_number):
-        self.former_middle_cards = np.append(self.former_middle_cards, copy.deepcopy(self.middle_cards))
         if action == 0:
             self.knocked += 1
         elif action == 1:
             self.swiped += 1
             if self.swiped == self.player_count:
-                self.middle_cards[0] = self.card_deck.draw()
-                self.middle_cards[1] = self.card_deck.draw()
-                self.middle_cards[2] = self.card_deck.draw()
+                self.replace_middle_cards()
         elif action == 2:
-            self.hand_cards[player_number][0], self.middle_cards[0] = self.middle_cards[0], self.hand_cards[player_number][0]
-            self.hand_cards[player_number][1], self.middle_cards[1] = self.middle_cards[1], self.hand_cards[player_number][1]
-            self.hand_cards[player_number][2], self.middle_cards[2] = self.middle_cards[2], self.hand_cards[player_number][2]
+            self.swap_cards(player_number, 0, 0)
+            self.swap_cards(player_number, 1, 1)
+            self.swap_cards(player_number, 2, 2)
         elif action == 3:
-            self.hand_cards[player_number][0], self.middle_cards[0] = self.middle_cards[0], self.hand_cards[player_number][0]
+            self.swap_cards(player_number, 0, 0)
         elif action == 4:
-            self.hand_cards[player_number][0], self.middle_cards[1] = self.middle_cards[1], self.hand_cards[player_number][0]
+            self.swap_cards(player_number, 0, 1)
         elif action == 5:
-            self.hand_cards[player_number][0], self.middle_cards[2] = self.middle_cards[2], self.hand_cards[player_number][0]
+            self.swap_cards(player_number, 0, 2)
         elif action == 6:
-            self.hand_cards[player_number][1], self.middle_cards[0] = self.middle_cards[0], self.hand_cards[player_number][1]
+            self.swap_cards(player_number, 1, 0)
         elif action == 7:
-            self.hand_cards[player_number][1], self.middle_cards[1] = self.middle_cards[1], self.hand_cards[player_number][1]
+            self.swap_cards(player_number, 1, 1)
         elif action == 8:
-            self.hand_cards[player_number][1], self.middle_cards[2] = self.middle_cards[2], self.hand_cards[player_number][1]
+            self.swap_cards(player_number, 1, 2)
         elif action == 9:
-            self.hand_cards[player_number][2], self.middle_cards[0] = self.middle_cards[0], self.hand_cards[player_number][2]
+            self.swap_cards(player_number, 2, 0)
         elif action == 10:
-            self.hand_cards[player_number][2], self.middle_cards[1] = self.middle_cards[1], self.hand_cards[player_number][2]
+            self.swap_cards(player_number, 2, 1)
         elif action == 11:
-            self.hand_cards[player_number][2], self.middle_cards[2] = self.middle_cards[2], self.hand_cards[player_number][2]
+            self.swap_cards(player_number, 2, 2)
 
         if action > 1:
             self.swiped = 0
         if action > 1 and self.knocked > 0:
             self.knocked += 1
 
+    def swap_cards(self, player_number, hand_index, middle_index):
+        self.hand_cards[player_number][hand_index], self.middle_cards[middle_index] = self.middle_cards[middle_index], self.hand_cards[player_number][hand_index]
+        if player_number != 0:
+            self.known_enemy_cards[player_number - 1][hand_index] = self.hand_cards[player_number][hand_index]
+
+    def replace_middle_cards(self):
+        """Draw a new middle row without ever inserting ``None`` cards.
+
+        The deck can contain fewer than three cards near the end of a game.
+        A missing draw ends the episode, but the previous middle card remains
+        available for constructing the final observation.
+        """
+        for index in range(3):
+            card = self.card_deck.draw()
+            if card is None:
+                self.deck_out_of_cards = True
+                return
+            self.middle_cards[index] = card
+
     def calculate_reward(self):
+        pressure = 0.01
         reward = 0
         reward = self.winner_to_reward(reward)
         reward = self.score_to_reward(reward)
+        reward -= pressure
         return reward
 
 
@@ -140,7 +157,10 @@ class Enviroment(Env):
         return reward
 
     def score_to_reward(self, reward):
-        return reward + self.scores[0] / 100
+        current_score = self.scores[0] if hasattr(self, 'scores') else 0
+        reward += current_score / 100 - self.last_score / 100
+        self.last_score = current_score
+        return reward
         
     def is_done(self):
         self.scores = self.calculate_score()
@@ -210,22 +230,21 @@ class Enviroment(Env):
             self.__get_suit_value(self.middle_cards[2].suit) / 4,         
             self.turns / self.max_turns,
             1 if self.knocked > 0 else 0,
-            1 if self.swiped < 0 else 0
+            1 if self.swiped > 0 else 0
         ], dtype=np.float32)
         # Keep the observation length fixed. Unknown enemy cards are encoded
         # as ones, while known cards replace the corresponding placeholders.
         enemy_observation = []
         for enemy_cards in self.known_enemy_cards:
             for j in range(3):
-                if j < len(enemy_cards):
+                if enemy_cards[j] is not None:
                     enemy_observation.extend([
                         enemy_cards[j].value / 12,
                         self.__get_suit_value(enemy_cards[j].suit) / 4,
                     ])
                 else:
                     enemy_observation.extend([1.0, 1.0])
-        observation = np.append(base_observation, enemy_observation)
-        return observation
+        return np.asarray((*base_observation, *enemy_observation), dtype=np.float32)
     
     def __get_suit_value(self, suit):
         if suit == "Clubs":
